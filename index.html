@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MARKET INDICES // 10-MIN RELAY BOARD</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --card-bg: #121212;
+      --border: #262626;
+      --text-main: #f4f4f4;
+      --text-muted: #737373;
+      --accent: #ffffff;
+      --pos-bg: #1c1c1c;
+      --neg-bg: #121212;
+      --font-mono: 'SF Mono', 'Roboto Mono', 'Cascadia Code', 'Courier New', Courier, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1.5rem;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .title { font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+
+    .status-bar {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .indicator {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent);
+      border-radius: 50%;
+      display: inline-block;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.2; }
+      100% { opacity: 1; }
+    }
+
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.25rem;
+      flex-grow: 1;
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.2s ease;
+    }
+
+    .card:hover { border-color: var(--accent); }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .symbol-name { font-size: 1rem; font-weight: 700; letter-spacing: 1px; }
+    .symbol-ticker { font-size: 0.75rem; color: var(--text-muted); }
+
+    .price-value {
+      font-size: 1.9rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 1rem;
+    }
+
+    .change-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid var(--border);
+      width: fit-content;
+    }
+
+    .change-badge.positive { background-color: var(--pos-bg); color: #ffffff; border-color: #525252; }
+    .change-badge.negative { background-color: var(--neg-bg); color: #a3a3a3; border-color: #333333; }
+
+    .meta-info {
+      margin-top: 1.25rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    footer {
+      margin-top: 2rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      .grid-container { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .price-value { font-size: 1.5rem; }
+    }
+
+    @media (max-width: 480px) { .grid-container { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="title">MARKET INDICES // 10-MIN RELAY BOARD</div>
+    <div class="status-bar">
+      <span class="indicator"></span>
+      <span id="last-updated">STATUS: CONNECTING TO RELAY...</span>
+    </div>
+  </header>
+
+  <div class="grid-container" id="indices-grid"></div>
+
+  <footer>
+    <span>SERVERLESS RELAY ENGINE</span>
+    <span>POLL INTERVAL: 10 MINUTES</span>
+  </footer>
+
+  <script>
+    const TARGET_INDICES = [
+      { ticker: '^HSI', name: 'HANG SENG INDEX' },
+      { ticker: '^FTSE', name: 'FTSE 100' },
+      { ticker: '^DJI', name: 'DOW JONES' },
+      { ticker: '^GSPC', name: 'S&P 500' },
+      { ticker: '^IXIC', name: 'NASDAQ' }
+    ];
+
+    async function fetchIndexData(ticker) {
+      // Call Netlify Serverless Function backend route
+      const apiUrl = `/.netlify/functions/stock?ticker=${encodeURIComponent(ticker)}`;
+
+      try {
+        const response = await fetch(apiUrl);
+        if (!response.ok) throw new Error('Relay function error');
+        
+        const json = await response.json();
+        const result = json.chart.result[0];
+        const meta = result.meta;
+        const quotes = result.indicators.quote[0];
+        
+        const validCloses = quotes.close.filter(val => val !== null && !isNaN(val));
+        if (validCloses.length === 0) throw new Error('No valid close data');
+
+        const currentPrice = validCloses[validCloses.length - 1];
+        const prevClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPreviousClose;
+
+        const changePoints = currentPrice - prevClose;
+        const changePercent = (changePoints / prevClose) * 100;
+
+        return {
+          ticker,
+          currentPrice,
+          prevClose,
+          changePoints,
+          changePercent,
+          currency: meta.currency || 'USD'
+        };
+      } catch (err) {
+        console.warn(`Error for ${ticker}:`, err.message);
+        return null;
+      }
+    }
+
+    function renderBoard(results) {
+      const grid = document.getElementById('indices-grid');
+      grid.innerHTML = '';
+
+      results.forEach((item, idx) => {
+        const config = TARGET_INDICES[idx];
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        if (!item) {
+          card.innerHTML = `
+            <div class="card-header">
+              <span class="symbol-name">${config.name}</span>
+              <span class="symbol-ticker">${config.ticker}</span>
+            </div>
+            <div class="price-value" style="color: #737373; font-size: 1.2rem;">OFFLINE</div>
+            <div class="meta-info">
+              <span>RELAY PENDING</span>
+              <span>AUTO-RETRY</span>
+            </div>
+          `;
+          grid.appendChild(card);
+          return;
+        }
+
+        const isPos = item.changePercent >= 0;
+        const sign = isPos ? '+' : '';
+        const badgeClass = isPos ? 'positive' : 'negative';
+        const arrow = isPos ? '▲' : '▼';
+
+        card.innerHTML = `
+          <div class="card-header">
+            <span class="symbol-name">${config.name}</span>
+            <span class="symbol-ticker">${config.ticker}</span>
+          </div>
+          <div class="price-value">${item.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div class="change-badge ${badgeClass}">
+            <span>${arrow} ${sign}${item.changePoints.toFixed(2)}</span>
+            <span>(${sign}${item.changePercent.toFixed(2)}%)</span>
+          </div>
+          <div class="meta-info">
+            <span>PREV: ${item.prevClose.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span>10M UPDATE</span>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+
+      document.getElementById('last-updated').innerText = `SYNCED: ${new Date().toLocaleTimeString()}`;
+    }
+
+    async function refreshData() {
+      const promises = TARGET_INDICES.map(i => fetchIndexData(i.ticker));
+      const results = await Promise.all(promises);
+      renderBoard(results);
+    }
+
+    refreshData();
+    setInterval(refreshData, 600000); // 10-minute poll interval
+  </script>
+</body>
+</html>
